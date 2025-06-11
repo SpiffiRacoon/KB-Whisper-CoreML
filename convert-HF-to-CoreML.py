@@ -102,5 +102,5 @@ decoder = model.model.decoder
 encoder, decoder = convertToCoreML(hparams, encoder, decoder)
 
 # Save the converted model.
-#encoder.save("kb-whisper-large-encoder.mlpackage")
-#decoder.save("kb-whisper-large-decoder.mlpackage")
+encoder.save("kb-whisper-large-encoder.mlpackage")
+decoder.save("kb-whisper-large-decoder.mlpackage")
