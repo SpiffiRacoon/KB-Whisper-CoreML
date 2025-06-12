@@ -22,9 +22,10 @@ import numpy as np
 ## convert_encoder/decoder from https://github.com/ggml-org/whisper.cpp/models/convert-whisper-to-coreml.py
 
 class DecoderWrapper(torch.nn.Module):
-    def __init__(self, decoder, config):
+    def __init__(self, decoder, proj_out, config):
         super().__init__()
         self.decoder = decoder
+        self.proj_out = proj_out
         self.config = config
 
     def forward(self, decoder_input_ids, encoder_hidden_states):
@@ -34,9 +35,11 @@ class DecoderWrapper(torch.nn.Module):
             encoder_hidden_states=encoder_hidden_states,
             use_cache=False,  # set True if you later want to support cached decoding
         )
-        return outputs[0]  # shape: (batch_size, seq_len, hidden_dim)
+        logits = self.proj_out(outputs[0])  # (batch, seq_len, vocab_size)
+        return logits
 
-def convertToCoreML(hparams, encoder, decoder):
+
+def convertToCoreML(hparams, encoder, decoder, proj_out):
     # Begin tracing and converting encoder (easy)
     encoder.eval()
 
@@ -49,11 +52,11 @@ def convertToCoreML(hparams, encoder, decoder):
     encoder = ct.convert(
         traced_encoder,
         convert_to="mlprogram",
-        inputs=[ct.TensorType(name="logmel_data", shape=encoder_input_shape, dtype=np.float16)],
-        outputs=[ct.TensorType(name="output", dtype=np.float16)],
+        inputs=[ct.TensorType(name="logmel_data", shape=encoder_input_shape)],
+        outputs=[ct.TensorType(name="output")],
         compute_units=ct.ComputeUnit.ALL,
-        minimum_deployment_target=ct.target.macOS13,
-        compute_precision=ct.precision.FLOAT16
+        compute_precision=ct.precision.FLOAT16,
+        minimum_deployment_target=ct.target.macOS13
     )
     
     encoder_output = traced_encoder(encoder_input_data)
@@ -64,7 +67,7 @@ def convertToCoreML(hparams, encoder, decoder):
     
     decoder_input_ids = torch.randint(0, hparams.vocab_size, (1, 1), dtype=torch.long)
     
-    decoder_module = DecoderWrapper(decoder, hparams)
+    decoder_module = DecoderWrapper(decoder, proj_out, hparams)
     
     # Trace the wrapped decoder
     traced_decoder = torch.jit.trace(
@@ -77,13 +80,13 @@ def convertToCoreML(hparams, encoder, decoder):
         traced_decoder,
         convert_to="mlprogram",
         inputs=[
-            ct.TensorType(name="decoder_input_ids", shape=(1, 1), dtype=np.int32),
-            ct.TensorType(name="encoder_hidden_states", shape=encoder_hidden.shape, dtype=np.float32),
+            ct.TensorType(name="decoder_input_ids", shape=(1, 1)),
+            ct.TensorType(name="encoder_hidden_states", shape=encoder_hidden.shape),
         ],
         compute_units=ct.ComputeUnit.ALL,
+        compute_precision=ct.precision.FLOAT16,
         minimum_deployment_target=ct.target.macOS13
     )
-
 
     return encoder, decoder
 
@@ -97,9 +100,10 @@ print(hparams)
 # Extract the encoder and decorder from the model
 encoder = model.model.encoder
 decoder = model.model.decoder
+proj_out = model.proj_out # Similar to lm_head
 
 # convert encoder and decorder to CoreML
-encoder, decoder = convertToCoreML(hparams, encoder, decoder)
+encoder, decoder = convertToCoreML(hparams, encoder, decoder, proj_out)
 
 # Save the converted model.
 encoder.save("kb-whisper-large-encoder.mlpackage")
