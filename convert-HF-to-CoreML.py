@@ -80,8 +80,11 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
         traced_decoder,
         convert_to="mlprogram",
         inputs=[
-            ct.TensorType(name="decoder_input_ids", shape=(1, 1)),
+            ct.TensorType(name="decoder_input_ids", shape=(1, 1), dtype=np.int32),
             ct.TensorType(name="encoder_hidden_states", shape=encoder_hidden.shape),
+        ],
+        outputs=[
+            ct.TensorType(name="output")  # name the output
         ],
         compute_units=ct.ComputeUnit.ALL,
         compute_precision=ct.precision.FLOAT16,
@@ -90,12 +93,12 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
 
     return encoder, decoder
 
+# Load fine-tuned model from hugging face
 model_id = "KBLab/kb-whisper-large"
-
 model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id, use_safetensors=True, cache_dir="cache", return_dict=False)
 
+# Extraxct model config variables
 hparams = model.config
-print(hparams)
 
 # Extract the encoder and decorder from the model
 encoder = model.model.encoder
