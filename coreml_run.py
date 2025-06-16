@@ -35,7 +35,7 @@ def encode(input_features):
     encoder_outputs = encoder_mlmodel.predict({"logmel_data": input_features})
     return encoder_outputs["output"]  # shape: (1, seq_len, d_model)
 
-def decode(encoder_hidden_states, INITIAL_TOKEN):
+def decode(encoder_hidden_states):
     output_tokens = [INITIAL_TOKEN]
     
     for _ in range(MAX_LENGTH):
@@ -69,6 +69,6 @@ def transcribe(file_path):
     return transcription
 
 # TODO: Make proper method for running the "model" this way instead of just hard coding into the script.
-file_path = "testAudio_1min.wav"  # Replace with your audio file
+file_path = "testAudio_30sec.wav"  # Replace with your audio file
 text = transcribe(file_path)
 print("Transcription:", text)
