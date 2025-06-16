@@ -66,9 +66,13 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
     else:
         encoder_hidden = encoder_output  # should be (1, seq_len, d_model)
     
+    decoder.eval()
+    
     decoder_input_ids = torch.randint(0, hparams.vocab_size, (1, 1), dtype=torch.long)
     
     decoder_module = DecoderWrapper(decoder, proj_out, hparams)
+    
+    decoder_module.eval()
     
     # trace the wrapped decoder instead
     traced_decoder = torch.jit.trace(
