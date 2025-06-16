@@ -12,10 +12,10 @@ decoder_mlmodel = ct.models.MLModel("kb-whisper-large-decoder.mlpackage")
 model_id = "KBLab/kb-whisper-large"
 
 # Load processor
-processor = WhisperProcessor.from_pretrained("KBLab/kb-whisper-large")
+processor = WhisperProcessor.from_pretrained(model_id)
 
 # Load config
-config = AutoConfig.from_pretrained()
+config = AutoConfig.from_pretrained(model_id)
 
 # Constants
 MAX_LENGTH = config.max_target_positions
