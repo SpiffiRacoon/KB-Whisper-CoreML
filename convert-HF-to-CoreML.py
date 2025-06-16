@@ -29,14 +29,15 @@ class DecoderWrapper(torch.nn.Module):
         self.config = config
 
     def forward(self, decoder_input_ids, encoder_hidden_states):
-        # Forward through the decoder
+        # Explicitly pass only the arguments we know CoreML can trace
         outputs = self.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_hidden_states,
-            use_cache=False,  # set True if you later want to support cached decoding
+            return_dict=False,
+            use_cache=False
         )
-        logits = self.proj_out(outputs[0])  # (batch, seq_len, vocab_size)
-        return logits
+        hidden_states = outputs[0]  # assuming outputs = (hidden_states, ...)
+        return self.proj_out(hidden_states)
 
 
 def convertToCoreML(hparams, encoder, decoder, proj_out):
@@ -69,7 +70,7 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
     
     decoder_module = DecoderWrapper(decoder, proj_out, hparams)
     
-    # Trace the wrapped decoder
+    # trace the wrapped decoder instead
     traced_decoder = torch.jit.trace(
         decoder_module,
         (decoder_input_ids, encoder_hidden),
@@ -80,11 +81,11 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
         traced_decoder,
         convert_to="mlprogram",
         inputs=[
-            ct.TensorType(name="decoder_input_ids", shape=(1, 1), dtype=np.int32),
+            ct.TensorType(name="decoder_input_ids", shape=(1, 448), dtype=np.int32),
             ct.TensorType(name="encoder_hidden_states", shape=encoder_hidden.shape),
         ],
         outputs=[
-            ct.TensorType(name="output")  # name the output
+            ct.TensorType(name="output")
         ],
         compute_units=ct.ComputeUnit.ALL,
         compute_precision=ct.precision.FLOAT16,
