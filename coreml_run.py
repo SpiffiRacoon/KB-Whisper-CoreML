@@ -1,6 +1,6 @@
 import numpy as np
-import librosa
-import coremltools as ct
+import torchaudio
+from coremltools.models import MLModel
 from transformers import AutoProcessor, AutoConfig
 from tqdm import trange
 import sys
@@ -10,8 +10,14 @@ CHUNK_LENGTH = 30.0  # seconds
 CHUNK_OVERLAP = 5.0  # seconds
 
 def load_audio(file_path, sample_rate):
-    audio, _ = librosa.load(file_path, sr=sample_rate)
-    return audio
+    waveform, original_sr = torchaudio.load(file_path)
+    if original_sr != sample_rate:
+        resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=sample_rate)
+        waveform = resampler(waveform)
+    # Convert from stereo to mono if necessary
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    return waveform.squeeze(0).numpy()
 
 def preprocess(audio, processor):
     inputs = processor.feature_extractor(audio, sampling_rate=16000, return_tensors="np")
@@ -84,8 +90,8 @@ def decode_with_timestamps(token_ids, notimestamp_id, processor):
 def transcribe(file_path, model_id, timestamps=False, sample_rate=16000):
     # Load CoreML models
     print("Compiling CoreML models (ANE compiler), this might take a while...")
-    encoder_mlmodel = ct.models.MLModel((model_id+"-encoder.mlpackage"))
-    decoder_mlmodel = ct.models.MLModel((model_id+"-decoder.mlpackage"))
+    encoder_mlmodel = MLModel((model_id+"-encoder.mlpackage"))
+    decoder_mlmodel = MLModel((model_id+"-decoder.mlpackage"))
     
     # Load processor
     processor = AutoProcessor.from_pretrained(model_id)
