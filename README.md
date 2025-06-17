@@ -34,3 +34,9 @@ If you with for the output from the model to have timestamps you simply add time
 ```
 $python3 coreml_run.py small <path_to_soundfile> timestamps
 ```
+
+## Current issues
+**THIS MODEL IS NOT FASTER THAN THE ALTERNATIVE CURRENTLY**
+
+Due to maybe the implementation of the conversion, coremltools not supporting all instructions or the apple neural engine simply not being fast for large language models.
+This converted model in it's current state is no faster than using the metal-api to instead use only the gpu for acceleration.
