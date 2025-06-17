@@ -2,6 +2,8 @@ import torch
 from transformers import AutoModelForSpeechSeq2Seq
 import coremltools as ct
 import numpy as np
+import sys
+
 
 #device = "mps:0" if torch.mps.is_available() else "cpu"
 #torch_dtype = torch.float16 if torch.mps.is_available() else torch.float32
@@ -79,11 +81,7 @@ def convertToCoreML(hparams, encoder, decoder, proj_out, optimize=False):
     decoder_module.eval()
     
     # trace the wrapped decoder instead
-    traced_decoder = torch.jit.trace(
-        decoder_module,
-        (decoder_input_ids, encoder_hidden),
-        strict=False
-    )
+    traced_decoder = torch.jit.trace(decoder_module,(decoder_input_ids, encoder_hidden))
     
     # Optional optimization step, may help performance
     if optimize:
@@ -93,7 +91,7 @@ def convertToCoreML(hparams, encoder, decoder, proj_out, optimize=False):
         traced_decoder,
         convert_to="mlprogram",
         inputs=[
-            ct.TensorType(name="decoder_input_ids", shape=(1, 448), dtype=np.int32),
+            ct.TensorType(name="decoder_input_ids", shape=(1, hparams.max_target_positions), dtype=np.int32),
             ct.TensorType(name="encoder_hidden_states", shape=encoder_hidden.shape),
         ],
         outputs=[
@@ -106,21 +104,34 @@ def convertToCoreML(hparams, encoder, decoder, proj_out, optimize=False):
 
     return encoder, decoder
 
-# Load fine-tuned model from hugging face
-model_id = "KBLab/kb-whisper-large"
-model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id, use_safetensors=True, cache_dir="cache", return_dict=False)
+if __name__ == "__main__":
+    modelSize = sys.argv[1]
+    
+    # Load fine-tuned model from hugging face
+    if modelSize == "small":
+        print("Converting KBLab/kb-whisper-small to CoreML...")
+        model_id = "KBLab/kb-whisper-small"
+    elif modelSize == "large":
+        print("Converting KBLab/kb-whisper-large to CoreML...")
+        model_id = "KBLab/kb-whisper-large"
+    
+    model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id, use_safetensors=True, cache_dir="cache", return_dict=False)
 
-# Extraxct model config variables
-hparams = model.config
+    # Extraxct model config variables
+    hparams = model.config
 
-# Extract the encoder and decorder from the model
-encoder = model.model.encoder
-decoder = model.model.decoder
-proj_out = model.proj_out # Similar to lm_head
+    # Extract the encoder and decorder from the model
+    encoder = model.model.encoder
+    decoder = model.model.decoder
+    proj_out = model.proj_out # Similar to lm_head
 
-# convert encoder and decorder to CoreML
-encoder, decoder = convertToCoreML(hparams, encoder, decoder, proj_out, optimize=True)
+    # convert encoder and decorder to CoreML
+    encoder, decoder = convertToCoreML(hparams, encoder, decoder, proj_out, optimize=True)
 
-# Save the converted model.
-encoder.save("kb-whisper-large-encoder.mlpackage")
-decoder.save("kb-whisper-large-decoder.mlpackage")
+    # Save the converted model.
+    if modelSize == "small":
+        encoder.save("kb-whisper-small-encoder.mlpackage")
+        decoder.save("kb-whisper-small-decoder.mlpackage")
+    elif modelSize == "large":
+        encoder.save("kb-whisper-large-encoder.mlpackage")
+        decoder.save("kb-whisper-large-decoder.mlpackage")
