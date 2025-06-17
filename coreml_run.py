@@ -141,16 +141,12 @@ def transcribe(file_path, timestamps=False):
                 segments.append(seg)
         else:
             all_tokens += token_ids
-
-        if offset + chunk_samples >= len(audio):
-            break  # reached the end
-
+    
     if timestamps:
         for seg in segments:
             print(f"[{seg['start']:.2f} → {seg['end']:.2f}] {seg['text']}")
         return segments
     else:
-        t.set_description("Decoding all tokens", refresh=True)
         transcription = decode_tokens(all_tokens)
         print("Transcription:", transcription)
         return transcription

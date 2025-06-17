@@ -34,13 +34,13 @@ class DecoderWrapper(torch.nn.Module):
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_hidden_states,
             return_dict=False,
-            use_cache=False
+            use_cache=False # enable after implementing function cache that works with coremltools
         )
         hidden_states = outputs[0]  # assuming outputs = (hidden_states, ...)
         return self.proj_out(hidden_states)
 
 
-def convertToCoreML(hparams, encoder, decoder, proj_out):
+def convertToCoreML(hparams, encoder, decoder, proj_out, optimize=False):
     # Begin tracing and converting encoder (easy)
     encoder.eval()
 
@@ -48,6 +48,10 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
     encoder_input_shape = (1, hparams.num_mel_bins, 3000)
     encoder_input_data = torch.randn(encoder_input_shape)
     traced_encoder = torch.jit.trace(encoder, encoder_input_data)
+    
+    # optional optimization step, may help performance
+    if optimize:
+        traced_encoder = torch.jit.optimize_for_inference(traced_encoder)
 
     # Encoder converted to mlpackage.
     encoder = ct.convert(
@@ -81,6 +85,10 @@ def convertToCoreML(hparams, encoder, decoder, proj_out):
         strict=False
     )
     
+    # Optional optimization step, may help performance
+    if optimize:
+        traced_decoder = torch.jit.optimize_for_inference(traced_decoder)
+    
     decoder = ct.convert(
         traced_decoder,
         convert_to="mlprogram",
@@ -111,7 +119,7 @@ decoder = model.model.decoder
 proj_out = model.proj_out # Similar to lm_head
 
 # convert encoder and decorder to CoreML
-encoder, decoder = convertToCoreML(hparams, encoder, decoder, proj_out)
+encoder, decoder = convertToCoreML(hparams, encoder, decoder, proj_out, optimize=True)
 
 # Save the converted model.
 encoder.save("kb-whisper-large-encoder.mlpackage")
