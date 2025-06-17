@@ -3,52 +3,33 @@ import librosa
 import coremltools as ct
 from transformers import AutoProcessor, AutoConfig
 from tqdm import trange
-
-# Load CoreML models
-print("Compiling CoreML models (ANE compiler), this might take a while...")
-encoder_mlmodel = ct.models.MLModel("kb-whisper-large-encoder.mlpackage")
-decoder_mlmodel = ct.models.MLModel("kb-whisper-large-decoder.mlpackage")
-
-# Model we have converted is the kb-whisper-large model
-model_id = "KBLab/kb-whisper-large"
-
-# Load processor
-processor = AutoProcessor.from_pretrained(model_id)
-
-# Load config
-config = AutoConfig.from_pretrained(model_id)
-
-# Constants
-MAX_LENGTH = config.max_target_positions
-SAMPLE_RATE = 16000
-EOT_TOKEN = processor.tokenizer.eos_token_id
-INITIAL_TOKEN = config.decoder_start_token_id # the default tokens are suitable for transciribing swedish.
+import sys
 
 # Testing to implement chunking (needed for files larger than 30 sec)
 CHUNK_LENGTH = 30.0  # seconds
 CHUNK_OVERLAP = 5.0  # seconds
 
-def load_audio(file_path, sample_rate=SAMPLE_RATE):
-    audio, sr = librosa.load(file_path, sr=sample_rate)
+def load_audio(file_path, sample_rate):
+    audio, _ = librosa.load(file_path, sr=sample_rate)
     return audio
 
-def preprocess(audio):
-    inputs = processor.feature_extractor(audio, sampling_rate=SAMPLE_RATE, return_tensors="np")
-    return inputs["input_features"]  # shape: (1, 128, 3000)
+def preprocess(audio, processor):
+    inputs = processor.feature_extractor(audio, sampling_rate=16000, return_tensors="np")
+    return inputs["input_features"]  # shape: (1, num_mil_bins, 3000)
 
-def encode(input_features):
+def encode(input_features, encoder_mlmodel):
     encoder_outputs = encoder_mlmodel.predict({"logmel_data": input_features})
     return encoder_outputs["output"]  # shape: (1, seq_len, d_model)
 
-def decode(encoder_hidden_states, initial_token = INITIAL_TOKEN, timestamps=False):
+def decode(encoder_hidden_states, notimestamp_id, decoder_mlmodel, initial_token, eot_token, max_length=448, timestamps=False):
     output_tokens = [initial_token]
     #output_tokens = initial_tokens.copy()
     
-    for _ in range(MAX_LENGTH):
-        if len(output_tokens) >= MAX_LENGTH:
+    for _ in range(max_length):
+        if len(output_tokens) >= max_length:
             break  # Avoid overflow
         
-        padded_input = np.zeros((1, MAX_LENGTH), dtype=np.int32)
+        padded_input = np.zeros((1, max_length), dtype=np.int32)
         padded_input[0, :len(output_tokens)] = output_tokens
 
         decoder_outputs = decoder_mlmodel.predict({
@@ -58,31 +39,28 @@ def decode(encoder_hidden_states, initial_token = INITIAL_TOKEN, timestamps=Fals
 
         logits = decoder_outputs["output"]
         
+        
         if timestamps:
-            #Prevent <|notimestamps|> (ID 50359) from being picked
-            logits[0, len(output_tokens) - 1, 50364] = -np.inf
+            #Prevent <|notimestamps|> from being picked
+            logits[0, len(output_tokens) - 1, notimestamp_id] = -np.inf
         
         next_token_id = np.argmax(logits[0, len(output_tokens)-1])
 
-        if next_token_id == EOT_TOKEN:
+        if next_token_id == eot_token:
             break
 
         output_tokens.append(next_token_id)
 
     return output_tokens
 
-def decode_tokens(tokens):
-    print()
-    return processor.tokenizer.decode(tokens, skip_special_tokens=False)
-
-def decode_with_timestamps(token_ids):
+def decode_with_timestamps(token_ids, notimestamp_id, processor):
     segments = []
     current_segment = {"start": None, "end": None, "tokens": []}
 
     for token in token_ids:
-        if 50364 <= token <= 51863:
+        if notimestamp_id <= token <= 51863:
             # timestamp
-            ts = (token - 50364) * 0.02
+            ts = (token - notimestamp_id) * 0.02
             if current_segment["start"] is None:
                 current_segment["start"] = ts
             else:
@@ -103,13 +81,33 @@ def decode_with_timestamps(token_ids):
 
     return segments
 
-def transcribe(file_path, timestamps=False):
-    print("loading audio...")
-    audio = load_audio(file_path)
-    duration = len(audio) / SAMPLE_RATE
+def transcribe(file_path, model_id, timestamps=False, sample_rate=16000):
+    # Load CoreML models
+    print("Compiling CoreML models (ANE compiler), this might take a while...")
+    encoder_mlmodel = ct.models.MLModel((model_id+"-encoder.mlpackage"))
+    decoder_mlmodel = ct.models.MLModel((model_id+"-decoder.mlpackage"))
+    
+    # Load processor
+    processor = AutoProcessor.from_pretrained(model_id)
+    
+    # Load config
+    config = AutoConfig.from_pretrained(model_id)
 
-    chunk_samples = int(CHUNK_LENGTH * SAMPLE_RATE)
-    hop_samples = int((CHUNK_LENGTH - CHUNK_OVERLAP) * SAMPLE_RATE)
+    # Configs
+    max_length = config.max_target_positions
+    eot_token = processor.tokenizer.eos_token_id
+    initial_token = config.decoder_start_token_id # the default tokens are suitable for transciribing swedish.
+    
+    if model_id == "KBLab/kb-whisper-small":
+        notimestamp_id = 50363
+    else:
+        notimestamp_id = 50364
+    
+    print("loading audio...")
+    audio = load_audio(file_path, sample_rate)
+
+    chunk_samples = int(CHUNK_LENGTH * sample_rate)
+    hop_samples = int((CHUNK_LENGTH - CHUNK_OVERLAP) * sample_rate)
     
     segments = []
     all_tokens = []
@@ -124,20 +122,21 @@ def transcribe(file_path, timestamps=False):
             chunk = np.concatenate([chunk, padding])
 
         t.set_description("Extracting features, waveform → tensor", refresh=True)
-        input_features = preprocess(chunk)
+        input_features = preprocess(chunk, processor)
         
         t.set_description("Running encode model on input tensor", refresh=True)
-        encoder_hidden_states = encode(input_features)
+        encoder_hidden_states = encode(input_features, encoder_mlmodel)
         
         t.set_description("Running decode predictions (token_ids)", refresh=True)
-        token_ids = decode(encoder_hidden_states, timestamps=timestamps)
+        token_ids = decode(encoder_hidden_states, notimestamp_id, decoder_mlmodel, 
+                           initial_token, eot_token, max_length, timestamps=timestamps)
 
         if timestamps:
             t.set_description("Decoding tokens with timestamps", refresh=True)
-            chunk_segments = decode_with_timestamps(token_ids)
+            chunk_segments = decode_with_timestamps(token_ids, notimestamp_id, processor)
             for seg in chunk_segments:
-                seg["start"] += offset / SAMPLE_RATE
-                seg["end"] += offset / SAMPLE_RATE
+                seg["start"] += offset / sample_rate
+                seg["end"] += offset / sample_rate
                 segments.append(seg)
         else:
             all_tokens += token_ids
@@ -147,11 +146,26 @@ def transcribe(file_path, timestamps=False):
             print(f"[{seg['start']:.2f} → {seg['end']:.2f}] {seg['text']}")
         return segments
     else:
-        transcription = decode_tokens(all_tokens)
+        transcription = processor.tokenizer.decode(all_tokens, skip_special_tokens=False)
         print("Transcription:", transcription)
         return transcription
 
-
-# TODO: Make proper method for running the "model" this way instead of just hard coding into the script.
-file_path = "testAudio_1min.wav"  # Replace with your audio file
-text = transcribe(file_path, True)
+if __name__ == "__main__":
+    modelSize = sys.argv[1]
+    file_path = sys.argv[2] # your audio file
+    timeArg = sys.argv[3]
+    
+    if timeArg == "timestamps":
+        timestamps = True
+    else:
+        timestamps = False
+    
+    # Load fine-tuned model from hugging face
+    if modelSize == "small":
+        print("Running kb-whisper-small...")
+        model_id = "KBLab/kb-whisper-small"
+    elif modelSize == "large":
+        print("Running kb-whisper-small...")
+        model_id = "KBLab/kb-whisper-large"
+    
+    transcribe(file_path, model_id, timestamps)

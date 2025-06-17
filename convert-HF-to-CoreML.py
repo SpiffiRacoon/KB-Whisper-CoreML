@@ -130,8 +130,8 @@ if __name__ == "__main__":
 
     # Save the converted model.
     if modelSize == "small":
-        encoder.save("kb-whisper-small-encoder.mlpackage")
-        decoder.save("kb-whisper-small-decoder.mlpackage")
+        encoder.save("KBLab/Kb-whisper-small-encoder.mlpackage")
+        decoder.save("KBLab/kb-whisper-small-decoder.mlpackage")
     elif modelSize == "large":
-        encoder.save("kb-whisper-large-encoder.mlpackage")
-        decoder.save("kb-whisper-large-decoder.mlpackage")
+        encoder.save("KBLab/kb-whisper-large-encoder.mlpackage")
+        decoder.save("KBLab/kb-whisper-large-decoder.mlpackage")
