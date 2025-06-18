@@ -29,14 +29,13 @@ def encode(input_features, encoder_mlmodel):
 
 def decode(encoder_hidden_states, notimestamp_id, decoder_mlmodel, initial_token, eot_token, max_length=448, timestamps=False):
     output_tokens = [initial_token]
-    #output_tokens = initial_tokens.copy()
+    padded_input = np.zeros((1, max_length), dtype=np.int32)
     
-    for _ in range(max_length):
-        if len(output_tokens) >= max_length:
-            break  # Avoid overflow
-        
-        padded_input = np.zeros((1, max_length), dtype=np.int32)
-        padded_input[0, :len(output_tokens)] = output_tokens
+    for i in range(max_length):
+        if i > 0 and output_tokens[-1] == eot_token:
+            break
+
+        padded_input[0, i] = output_tokens[-1]
 
         decoder_outputs = decoder_mlmodel.predict({
             "decoder_input_ids": padded_input,
@@ -45,16 +44,11 @@ def decode(encoder_hidden_states, notimestamp_id, decoder_mlmodel, initial_token
 
         logits = decoder_outputs["output"]
         
-        
         if timestamps:
             #Prevent <|notimestamps|> from being picked
             logits[0, len(output_tokens) - 1, notimestamp_id] = -np.inf
         
         next_token_id = np.argmax(logits[0, len(output_tokens)-1])
-
-        if next_token_id == eot_token:
-            break
-
         output_tokens.append(next_token_id)
 
     return output_tokens
