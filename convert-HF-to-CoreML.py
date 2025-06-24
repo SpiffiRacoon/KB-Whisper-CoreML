@@ -49,7 +49,9 @@ def convertToCoreML(hparams, encoder, decoder, proj_out, optimize=False):
     # We use a dummy tensor with correct shape to trace the encoder.
     encoder_input_shape = (1, hparams.num_mel_bins, 3000)
     encoder_input_data = torch.randn(encoder_input_shape)
-    traced_encoder = torch.jit.trace(encoder, encoder_input_data)
+    
+    with torch.no_grad():
+        traced_encoder = torch.jit.trace(encoder, encoder_input_data)
     
     # optional optimization step, may help performance
     if optimize:
@@ -81,7 +83,8 @@ def convertToCoreML(hparams, encoder, decoder, proj_out, optimize=False):
     decoder_module.eval()
     
     # trace the wrapped decoder instead
-    traced_decoder = torch.jit.trace(decoder_module,(decoder_input_ids, encoder_hidden))
+    with torch.no_grad():
+        traced_decoder = torch.jit.trace(decoder_module,(decoder_input_ids, encoder_hidden))
     
     # Optional optimization step, may help performance
     if optimize:
